@@ -1,0 +1,107 @@
+import os
+import pandas as pd
+import win32com.client
+import FreeSimpleGUI as sg
+
+sg.theme('DarkBrown4')
+def get_all_folders(folder):
+    """
+    Recursively fetch all subfolders in the mailbox.
+    """
+    subfolders = [folder]  
+    for subfolder in folder.Folders:
+        subfolders.extend(get_all_folders(subfolder))  
+    return subfolders
+
+
+path = "~/Desktop/file.xlsx"
+excel_file = os.path.expanduser(path)
+
+try:
+    df = pd.read_excel(excel_file)
+    print("Excel file loaded successfully.")
+except Exception as e:
+    sg.popup_error(f"Error loading Excel file: {e}")
+    exit()
+
+records = []
+for _, row in df.iterrows():
+    record1 = row.iloc[0] 
+    record2 = row.iloc[7] 
+    records.extend([str(record1).strip(), str(record2).strip()])
+records = [r for r in records if pd.notnull(r)]
+records = [r.lower() for r in records]
+print(f"Extracted records to match: {records}")
+
+
+try:
+    outlook = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
+    mailboxes = outlook.Folders  
+    print(f"Connected to Outlook. Found {len(mailboxes)} mailboxes.")
+except Exception as e:
+    sg.popup_error(f"Error connecting to Outlook: {e}")
+    exit()
+
+save_folder = os.path.expanduser("~/Desktop/saved_attachments")
+os.makedirs(save_folder, exist_ok=True)
+
+layout = [
+    [sg.Text("Processing Mailboxes...", size=(40, 1), key="-TEXT-")],
+    [sg.ProgressBar(1, orientation="h", size=(50, 20), key="-PROG_BAR-")],
+]
+
+window = sg.Window("Email Processing Progress", layout, finalize=True, no_titlebar=True, grab_anywhere=True)  
+
+try:
+    total_mailboxes = len(mailboxes)
+    current_mailbox = 0
+
+    for mailbox in mailboxes:
+        current_mailbox += 1
+        window.read(timeout=1)
+        window["-TEXT-"].update(f"Processing mailbox {current_mailbox}/{total_mailboxes}: {mailbox.Name}")
+
+        try:
+            all_folders = get_all_folders(mailbox) 
+            total_folders = len(all_folders)
+            folder_count = 0
+
+            for folder in all_folders:
+                folder_count += 1
+                window.read(timeout=1)  
+                window["-TEXT-"].update(f"Processing folder {folder_count}/{total_folders} in '{mailbox.Name}': {folder.Name}")
+                window["-PROG_BAR-"].update(current_count=folder_count, max=total_folders)
+
+                items = folder.Items
+                items = items.Restrict("[MessageClass] = 'IPM.Note'")
+
+                for item in items:
+                    if item.Class == 43: 
+                        for attachment in item.Attachments:
+                            attachment_name = attachment.FileName.lower().strip()  
+                            
+                            if attachment_name.endswith(".pdf"):  
+                                if any(record in attachment_name for record in records):
+                                    base_name, ext = os.path.splitext(attachment_name)
+                                    save_path = os.path.join(save_folder, attachment_name)
+                                    counter = 1
+                                    while os.path.exists(save_path):
+                                        save_path = os.path.join(save_folder, f"{base_name}_{counter}{ext}")
+                                        counter += 1
+
+                                    attachment.SaveAsFile(save_path)
+
+            window["-PROG_BAR-"].update(current_count=0)
+
+        except Exception as e:
+            print(f"Error processing mailbox '{mailbox.Name}': {e}")
+            sg.popup_error(f"Error processing mailbox '{mailbox.Name}': {e}")
+
+except Exception as e:
+    sg.popup_error(f"Unexpected error: {e}")
+
+finally:
+    window.close()
+
+print("\nAttachment saving process completed.")
+sg.popup("Processing Complete", "All attachments have been saved.")
