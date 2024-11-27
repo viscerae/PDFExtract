@@ -26,11 +26,17 @@ except Exception as e:
 
 records = []
 for _, row in df.iterrows():
-    record1 = row.iloc[0] 
-    record2 = row.iloc[7] 
-    records.extend([str(record1).strip(), str(record2).strip()])
-records = [r for r in records if pd.notnull(r)]
-records = [r.lower() for r in records]
+    record1 = row.iloc[0]
+    record2 = row.iloc[7]
+    
+    # Only process values that are not NaN
+    if pd.notnull(record1):
+        records.append(str(record1).strip())
+    if pd.notnull(record2):
+        records.append(str(record2).strip())
+
+# Convert all valid records to lowercase
+records = [r.lower() for r in records if r]
 print(f"Extracted records to match: {records}")
 
 
